@@ -1,0 +1,2 @@
+This file ensures the Resources directory exists.
+Add app icons, localization files, and other resources here.
