@@ -71,6 +71,12 @@ public actor AWSCostExplorerClient {
         let lastMonthCost = parseMonthlyTotal(from: lastMonthData)
         let monthlyCosts = parseMonthlyCosts(from: historyData)
 
+        // Debug logging
+        logger.info("[\(account.name)] Daily costs count: \(dailyCosts.count), MTD total: $\(String(format: "%.2f", monthToDateCost))")
+        if let first = dailyCosts.first, let last = dailyCosts.last {
+            logger.info("[\(account.name)] Date range: \(first.date) to \(last.date)")
+        }
+
         let dayOfMonth = calendar.component(.day, from: today)
         let dailyAverage = dayOfMonth > 0 ? monthToDateCost / Double(dayOfMonth) : 0
 
@@ -327,7 +333,13 @@ public actor AWSCostExplorerClient {
 
     private func parseDailyCosts(from response: [String: Any]) -> [DailyCost] {
         guard let results = response["ResultsByTime"] as? [[String: Any]] else {
+            logger.warning("No ResultsByTime in response: \(response.keys)")
             return []
+        }
+
+        // Debug: log the first result to see available metrics
+        if let first = results.first, let total = first["Total"] as? [String: Any] {
+            logger.info("Available metrics in response: \(total.keys)")
         }
 
         let formatter = ISO8601DateFormatter()
