@@ -40,7 +40,13 @@ struct MenuContentView: View {
                             AccountCardView(
                                 account: account,
                                 snapshot: store.snapshot(for: account.id),
-                                error: store.errors[account.id]
+                                error: store.errors[account.id],
+                                isSSOExpired: store.hasSSOExpired(accountId: account.id),
+                                onSSOLogin: {
+                                    Task {
+                                        await store.triggerSSOLogin(for: account.id)
+                                    }
+                                }
                             )
                             .frame(maxWidth: .infinity)
                         }

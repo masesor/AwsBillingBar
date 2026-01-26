@@ -7,6 +7,8 @@ struct AccountCardView: View {
     let account: AWSAccount
     let snapshot: BillingSnapshot?
     let error: String?
+    let isSSOExpired: Bool
+    let onSSOLogin: () -> Void
 
     @State private var isExpanded = false
 
@@ -129,14 +131,35 @@ struct AccountCardView: View {
     }
 
     private func errorView(_ error: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.red)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: isSSOExpired ? "key.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(isSSOExpired ? .orange : .red)
 
-            Text(error)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
+                Text(isSSOExpired ? "SSO session expired" : error)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            if isSSOExpired {
+                Button(action: {
+                    onSSOLogin()
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.right.circle.fill")
+                            .font(.caption)
+                        Text("Re-authenticate")
+                            .font(.caption.weight(.medium))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.orange)
+                    .foregroundColor(.white)
+                    .cornerRadius(4)
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.vertical, 4)
     }

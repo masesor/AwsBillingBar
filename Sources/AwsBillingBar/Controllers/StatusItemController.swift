@@ -113,7 +113,13 @@ final class StatusItemController: NSObject {
                 let accountView = AccountCardView(
                     account: account,
                     snapshot: store.snapshot(for: account.id),
-                    error: store.errors[account.id]
+                    error: store.errors[account.id],
+                    isSSOExpired: store.hasSSOExpired(accountId: account.id),
+                    onSSOLogin: { [weak store] in
+                        Task { @MainActor in
+                            await store?.triggerSSOLogin(for: account.id)
+                        }
+                    }
                 )
                 accountItem.view = NSHostingView(rootView: accountView)
                 newMenu.addItem(accountItem)

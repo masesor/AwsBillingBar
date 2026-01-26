@@ -34,12 +34,52 @@ public actor AWSCredentialsManager {
         // Try to get credentials from AWS CLI
         let profileArg = profile.map { "--profile \($0)" } ?? ""
 
-        // First try to get credentials from environment or credential process
-        let result = try await runAWSCLI(
-            "configure export-credentials \(profileArg) --format env"
-        )
+        do {
+            // First try to get credentials from environment or credential process
+            let result = try await runAWSCLI(
+                "configure export-credentials \(profileArg) --format env"
+            )
+            return try parseCredentialsFromEnv(result)
+        } catch let error as AWSError {
+            // Check if this is an SSO expiration error
+            if case .cliError(let message) = error, AWSError.isSSOMesage(message) {
+                throw AWSError.ssoSessionExpired(profile: profile)
+            }
+            throw error
+        }
+    }
 
-        return try parseCredentialsFromEnv(result)
+    /// Trigger SSO login for a profile (opens browser)
+    /// Returns true if the login command was launched successfully
+    @discardableResult
+    public func triggerSSOLogin(profile: String?) async throws -> Bool {
+        let profileArg = profile.map { "--profile \($0)" } ?? ""
+
+        // Clear cached credentials for this profile
+        clearCache(for: profile)
+
+        // Run SSO login - this opens the browser
+        logger.info("Triggering SSO login for profile: \(profile ?? "default")")
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let process = Process()
+            let pipe = Pipe()
+
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["bash", "-c", "aws sso login \(profileArg)"]
+            process.standardOutput = pipe
+            process.standardError = pipe
+
+            do {
+                try process.run()
+                // Don't wait for exit - SSO login is interactive and opens browser
+                // Just check that the process started successfully
+                continuation.resume(returning: true)
+            } catch {
+                logger.error("Failed to launch SSO login: \(error)")
+                continuation.resume(throwing: AWSError.cliError("Failed to launch SSO login: \(error.localizedDescription)"))
+            }
+        }
     }
 
     /// Parse credentials from AWS CLI export-credentials output
@@ -156,6 +196,7 @@ public enum AWSError: Error, LocalizedError {
     case apiError(String)
     case invalidResponse
     case notConfigured
+    case ssoSessionExpired(profile: String?)
 
     public var errorDescription: String? {
         switch self {
@@ -169,6 +210,33 @@ public enum AWSError: Error, LocalizedError {
             return "Invalid response from AWS"
         case .notConfigured:
             return "AWS account not configured"
+        case .ssoSessionExpired:
+            return "SSO session expired. Click to re-authenticate."
         }
+    }
+
+    /// Check if this error is an SSO session expiration
+    public var isSSOExpired: Bool {
+        if case .ssoSessionExpired = self {
+            return true
+        }
+        return false
+    }
+
+    /// Check if an error message indicates SSO expiration
+    public static func isSSOMesage(_ message: String) -> Bool {
+        let ssoIndicators = [
+            "SSO",
+            "sso",
+            "Token has expired",
+            "token has expired",
+            "session has expired",
+            "Session has expired",
+            "Error loading SSO Token",
+            "The SSO session",
+            "refresh_token",
+            "token is expired"
+        ]
+        return ssoIndicators.contains { message.contains($0) }
     }
 }

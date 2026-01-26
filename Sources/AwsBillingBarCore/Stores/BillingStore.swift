@@ -12,6 +12,9 @@ public final class BillingStore {
     /// Errors by account ID
     public private(set) var errors: [String: String] = [:]
 
+    /// Accounts with SSO session expiration (account ID -> profile name)
+    public private(set) var ssoExpiredAccounts: [String: String?] = [:]
+
     /// Whether a refresh is in progress
     public private(set) var isRefreshing: Bool = false
 
@@ -77,9 +80,17 @@ public final class BillingStore {
                 case .success(let snapshot):
                     snapshots[accountId] = snapshot
                     errors.removeValue(forKey: accountId)
+                    ssoExpiredAccounts.removeValue(forKey: accountId)
                 case .failure(let error):
                     errors[accountId] = error.localizedDescription
                     logger.error("Failed to fetch billing for \(accountId): \(error)")
+
+                    // Track SSO expiration specifically
+                    if let awsError = error as? AWSError, case .ssoSessionExpired(let profile) = awsError {
+                        ssoExpiredAccounts[accountId] = profile
+                    } else {
+                        ssoExpiredAccounts.removeValue(forKey: accountId)
+                    }
                 }
             }
         }
@@ -135,6 +146,31 @@ public final class BillingStore {
     /// Get available AWS profiles
     public func availableProfiles() async -> [String] {
         await credentialsManager.listProfiles()
+    }
+
+    /// Check if an account has an SSO session expiration error
+    public func hasSSOExpired(accountId: String) -> Bool {
+        ssoExpiredAccounts[accountId] != nil
+    }
+
+    /// Trigger SSO login for an account (opens browser for authentication)
+    public func triggerSSOLogin(for accountId: String) async {
+        guard let account = accounts.first(where: { $0.id == accountId }) else {
+            logger.error("Account not found for SSO login: \(accountId)")
+            return
+        }
+
+        do {
+            try await credentialsManager.triggerSSOLogin(profile: account.profileName)
+            logger.info("SSO login triggered for account: \(account.name)")
+
+            // Clear the error state - user will need to refresh after authenticating
+            errors.removeValue(forKey: accountId)
+            ssoExpiredAccounts.removeValue(forKey: accountId)
+        } catch {
+            logger.error("Failed to trigger SSO login: \(error)")
+            errors[accountId] = "Failed to start SSO login: \(error.localizedDescription)"
+        }
     }
 
 
@@ -271,6 +307,8 @@ public enum RefreshFrequency: String, CaseIterable, Sendable {
     case fiveMinutes = "5min"
     case fifteenMinutes = "15min"
     case oneHour = "1hour"
+    case twelveHours = "12hours"
+    case twentyFourHours = "24hours"
 
     public var displayName: String {
         switch self {
@@ -280,6 +318,8 @@ public enum RefreshFrequency: String, CaseIterable, Sendable {
         case .fiveMinutes: return "5 minutes"
         case .fifteenMinutes: return "15 minutes"
         case .oneHour: return "1 hour"
+        case .twelveHours: return "12 hours"
+        case .twentyFourHours: return "24 hours"
         }
     }
 
@@ -291,6 +331,8 @@ public enum RefreshFrequency: String, CaseIterable, Sendable {
         case .fiveMinutes: return 300
         case .fifteenMinutes: return 900
         case .oneHour: return 3600
+        case .twelveHours: return 43200
+        case .twentyFourHours: return 86400
         }
     }
 }
